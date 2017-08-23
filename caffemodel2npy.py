@@ -40,9 +40,6 @@ def pb2json(pb, print_arrays):
 		ftype = _ftype2js[field.type] if field.type in _ftype2js else _ftype2js['unknown']
 		if field.label == FD.LABEL_REPEATED:
 			js_value = map(ftype, value)
-			# if not print_arrays and (field.name == 'data' and len(js_value) > 8):
-			# 	head_n = 5
-			# 	js_value = js_value[:head_n] + ['(%d elements more)' % (len(js_value) - head_n)]
 			if field.name=='data':
 				print '\t',field.name,len(js_value)
 				if weight is None: weight = np.array(js_value).astype(np.float32)
@@ -52,6 +49,9 @@ def pb2json(pb, print_arrays):
 				if bias is not None: bias = bias.reshape(js_value)
 				else: 
 					if weight is not None: weight = weight.reshape(js_value)
+			if field.name == 'data' and len(js_value) > 8:
+				head_n = 4
+				js_value = js_value[:head_n] + ['(%d elements)' % (len(js_value))]
 		else:
 			js_value = ftype(value)
 			if field.name=='name': 
@@ -65,26 +65,27 @@ def pb2json(pb, print_arrays):
 		js[field.name] = js_value
 	return js
 
-parser = argparse.ArgumentParser('Dump model_name.caffemodel to a file JSON format for debugging')
-parser.add_argument(metavar = 'caffe.proto', dest = 'caffe_proto', help = 'Path to caffe.proto (typically located at CAFFE_ROOT/src/caffe/proto/caffe.proto)')
-parser.add_argument(metavar = 'model.caffemodel', dest = 'model_caffemodel', help = 'Path to model.caffemodel')
-parser.add_argument('--data', help = 'Print all arrays in full', action = 'store_true')
-parser.add_argument('--codegenDir', help = 'Path to an existing temporary directory to save generated protobuf Python classes', default = tempfile.mkdtemp())
+parser = argparse.ArgumentParser('Dump caffemodel to json and npy')
+parser.add_argument(metavar = 'model.caffemodel', dest = 'mpath')
 args = parser.parse_args()
 
-local_caffe_proto = os.path.join(args.codegenDir, os.path.basename(args.caffe_proto))
-with open(local_caffe_proto, 'w') as f:
-	f.write((urllib2.urlopen if 'http' in args.caffe_proto else open)(args.caffe_proto).read())
-	
-subprocess.check_call(['protoc', '--proto_path', os.path.dirname(local_caffe_proto), '--python_out', args.codegenDir, local_caffe_proto])
-sys.path.insert(0, args.codegenDir)
+# https://raw.githubusercontent.com/BVLC/caffe/master/src/caffe/proto/caffe.proto
+codegenDir = os.path.dirname(os.path.abspath(__file__))+'/tmp'
+if not os.path.exists(codegenDir): os.makedirs(codegenDir)
+local_caffe_proto = os.path.join(codegenDir, 'caffe.proto')
+
+subprocess.check_call(['protoc', '--proto_path', os.path.dirname(local_caffe_proto), '--python_out', codegenDir, local_caffe_proto])
+sys.path.insert(0, codegenDir)
 import caffe_pb2
 
-deserialized = caffe_pb2.NetParameter() if os.path.splitext(args.model_caffemodel)[1] == '.caffemodel' else caffe_pb2.BlobProto()
-deserialized.ParseFromString(open(args.model_caffemodel, 'rb').read())
+deserialized = caffe_pb2.NetParameter() if os.path.splitext(args.mpath)[1] == '.caffemodel' else caffe_pb2.BlobProto()
+deserialized.ParseFromString(open(args.mpath, 'rb').read())
 
 # json.dump(pb2json(deserialized, args.data), sys.stdout, indent = 2)
-pb2json(deserialized, args.data)
+jsobj=pb2json(deserialized, False)
+with open('small.json', 'w') as jsfile:
+	json.dump(jsobj,jsfile,indent=2)
+
 if weight is not None: npobj[npname+'.weight'] = weight
 if bias is not None: npobj[npname+'.bias'] = bias
 weight = None
